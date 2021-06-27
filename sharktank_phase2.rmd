@@ -1,0 +1,396 @@
+---
+output:
+  word_document: default
+  html_document: default
+---
+# Team Chapman & Niez 
+
+## CP phase 2 
+
+```{r, include=FALSE}
+library(tidyverse)
+library(tidymodels)
+library(caret)
+library(ranger)
+library(gridExtra)
+library(vip)
+library(ggcorrplot)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(RColorBrewer)
+
+
+
+library(mice)
+library(VIM)
+library(ranger)
+library(randomForest)
+library(RColorBrewer)
+library(rpart)
+library(rattle)
+library(e1071)
+library(xgboost)
+library(usemodels)
+library(stacks)
+
+shark_tank = read_csv("shark_student.csv")
+
+shark_tank = shark_tank %>%
+  mutate(Deal_Yes = as_factor(Deal_Yes)) %>%
+mutate(Deal_Yes = fct_recode(Deal_Yes, "No" = "0", "Yes" = "1" )) %>%
+mutate(ReceiveOffer = as_factor(ReceiveOffer)) %>%
+mutate(ReceiveOffer = fct_recode(ReceiveOffer, "No" = "0", "Yes" = "1" )) %>%
+mutate(RejectOffer = as_factor(RejectOffer)) %>%
+mutate(RejectOffer = fct_recode(RejectOffer, "No" = "0", "Yes" = "1" )) %>%
+mutate(Eth1 = as_factor(Eth1)) %>%
+mutate(Eth1 = fct_recode(Eth1, "African American" = "1", "White" = "2", "Asian" = "3", "Latino" = "4", "No Presenter" = "0")) %>%
+  mutate(Eth2 = as_factor(Eth2)) %>%
+mutate(Eth2 = fct_recode(Eth2, "African American" = "1", "White" = "2", "Asian" = "3", "Latino" = "4", "No Presenter" = "0")) %>%
+mutate(Eth3 = as_factor(Eth3)) %>%
+mutate(Eth3 = fct_recode(Eth3, "African American" = "1", "White" = "2", "Asian" = "3", "Latino" = "4", "No Presenter" = "0")) %>%
+  mutate(Eth4 = as_factor(Eth4)) %>%
+mutate(Eth4 = fct_recode(Eth4, "African American" = "1", "White" = "2", "Asian" = "3", "Latino" = "4", "No Presenter" = "0")) %>%
+mutate(Eth5 = as_factor(Eth5)) %>%
+mutate(Eth5 = fct_recode(Eth5, "African American" = "1", "White" = "2", "Asian" = "3", "Latino" = "4", "No Presenter" = "0")) %>% 
+  mutate(Company = as_factor(Company)) %>% 
+  mutate(CompanyState = as_factor(CompanyState)) %>% 
+  mutate(Deal_Yes = as_factor(Deal_Yes)) %>% 
+  mutate(Deal_Yes = fct_recode(Deal_Yes, "Yes" = "1", "No" = "0")) %>% 
+  mutate(`Fashion / Beauty` = as_factor(`Fashion / Beauty`)) %>% 
+  mutate(`Fashion / Beauty` = fct_recode(`Fashion / Beauty`, "Yes" = "1", "No" = "0")) %>% 
+  mutate(`Media / Entertainment` = as_factor(`Media / Entertainment`)) %>% 
+  mutate(`Media / Entertainment` = fct_recode(`Media / Entertainment`, "Yes" = "1", "No" = "0")) %>% 
+  mutate(`Fitness / Sports / Outdoors` = as_factor(`Fitness / Sports / Outdoors`)) %>% 
+  mutate(`Fitness / Sports / Outdoors` = fct_recode(`Fitness / Sports / Outdoors`, "Yes" = "1", "No" = "0")) %>% 
+  mutate(`Pet Products` = as_factor(`Pet Products`)) %>% 
+  mutate(`Pet Products` = fct_recode(`Pet Products`, "Yes" = "1", "No" = "0")) %>% 
+  mutate(Travel = as_factor(Travel)) %>% 
+  mutate(Travel = fct_recode(Travel, "Yes" = "1", "No" = "0")) %>% 
+  mutate(`Green/CleanTech` = as_factor(`Green/CleanTech`)) %>% 
+  mutate(`Green/CleanTech` = fct_recode(`Green/CleanTech`, "Yes" = "1", "No" = "0")) %>% 
+  mutate(`Uncertain / Other` = as_factor(`Uncertain / Other`)) %>% 
+  mutate(`Uncertain / Other` = fct_recode(`Uncertain / Other`, "Yes" = "1", "No" = "0")) %>% 
+  mutate(MalePresenter = as_factor(MalePresenter)) %>% 
+  mutate(MalePresenter = fct_recode(MalePresenter, "Yes" = "1", "No" = "0")) %>% 
+  mutate(FemalePresenter = as_factor(FemalePresenter)) %>% 
+  mutate(FemalePresenter = fct_recode(FemalePresenter, "Yes" = "1", "No" = "0")) 
+
+shark_tank = rename(shark_tank, "NumberOfPresenters" = "Number of Presenters")
+
+shark_tank = filter(shark_tank, Eth1 %in% c('African American', 'White', 'Asian', 'Latino') )
+
+shark_tank = shark_tank %>% 
+  drop_na()
+
+
+```
+## Random Forest Approach 
+
+```{r, include=FALSE}
+sharktank_clean = shark_tank %>% 
+  dplyr::select("NumberOfPresenters","Eth1","FemalePresenter","CompanyState","EquityRequested","Deal_Yes")
+
+#names(sharktank_clean)
+```
+
+```{r}
+set.seed(1234)
+shark_split = initial_split(sharktank_clean, prop = 0.7, strata = Deal_Yes) #70% in training
+train = training(shark_split)
+test = testing(shark_split)
+```
+
+```{r}
+set.seed(123)
+rf_folds = vfold_cv(train, v = 5)
+```
+
+```{r}
+shark_recipe = recipe(Deal_Yes ~., train) %>%
+step_dummy(all_nominal(), -all_outcomes())
+
+rf_model = rand_forest(mtry = tune(), min_n = tune(), trees = 500) %>%
+set_engine("ranger", importance = "permutation") %>% #added importance metric
+set_mode("classification")
+
+shark_wflow =
+workflow() %>%
+add_model(rf_model) %>%
+add_recipe(shark_recipe)
+
+rf_grid = grid_regular(
+mtry(range = c(2, 8)), #these values determined through significant trial and error
+min_n(range = c(5, 20)), #these values determined through significant trial and error
+levels = 10
+)
+set.seed(123)
+rf_res = tune_grid(
+shark_wflow,
+resamples = rf_folds,
+grid = rf_grid
+)
+
+```
+
+```{r}
+rf_res %>%
+collect_metrics() %>%
+filter(.metric == "accuracy") %>%
+mutate(min_n = factor(min_n)) %>%
+ggplot(aes(mtry, mean, color = min_n)) +
+geom_line(alpha = 0.5, size = 1.5) +
+geom_point() +
+labs(y = "Accuracy")
+```
+
+```{r}
+best_rf = select_best(rf_res, "accuracy")
+final_rf = finalize_workflow(
+shark_wflow,
+best_rf
+)
+final_rf
+```
+
+```{r}
+final_rf_fit = fit(final_rf, train)
+final_rf_fit %>% pull_workflow_fit() %>% vip(geom = "point")
+
+final_rf_fit = fit(final_rf, test)
+final_rf_fit %>% pull_workflow_fit() %>% vip(geom = "point")
+```
+
+```{r}
+trainpredrf = predict(final_rf_fit, train)
+head(trainpredrf)
+
+confusionMatrix(trainpredrf$.pred_class, train$Deal_Yes,
+positive = "Yes")
+```
+
+```{r}
+testpredrf = predict(final_rf_fit, test)
+head(testpredrf)
+
+confusionMatrix(testpredrf$.pred_class, test$Deal_Yes,
+positive = "Yes")
+```
+
+## Classification Tree Approach
+
+```{r}
+set.seed(12345)
+shark_split2 = initial_split(sharktank_clean, prop = 0.7, strata = Deal_Yes) #70% in training
+train2 = training(shark_split2)
+test2 = testing(shark_split2)
+
+
+```
+
+```{r}
+shark_recipe2 = recipe(Deal_Yes ~., train2) %>%
+step_dummy(all_predictors(), -all_outcomes())
+
+tree_model2 = decision_tree() %>%
+set_engine("rpart", model = TRUE) %>% #don't forget the model = TRUE flag
+set_mode("classification")
+
+shark_wflow =
+workflow() %>%
+add_model(tree_model2) %>%
+add_recipe(shark_recipe2)
+1
+
+shark_fit2 = fit(shark_wflow, train2)
+
+
+```
+
+```{r}
+tree = shark_fit2 %>%
+pull_workflow_fit() %>%
+pluck("fit")
+
+#plot the tree
+fancyRpartPlot(tree, tweak = 3)
+```
+
+```{r}
+shark_fit2$fit$fit$fit$cptable
+```
+
+**Tuning** 
+
+```{r}
+set.seed(123)
+folds = vfold_cv(train2, v = 5)
+
+```
+
+```{r}
+shark_recipe3 = recipe(Deal_Yes ~., train2) %>%
+step_dummy(all_nominal(),-all_outcomes())
+
+tree_model3 = decision_tree(cost_complexity = tune()) %>%
+set_engine("rpart", model = TRUE) %>% #don't forget the model = TRUE flag
+set_mode("classification")
+
+tree_grid3 = grid_regular(cost_complexity(),
+levels = 25) #try 25 sensible values for cp
+
+shark_wflow3 =
+workflow() %>%
+add_model(tree_model3) %>%
+add_recipe(shark_recipe3)
+
+tree_res =
+shark_wflow3 %>%
+tune_grid(
+resamples = folds,
+grid = tree_grid3
+)
+```
+
+```{r}
+tree_res %>%
+collect_metrics() %>%
+ggplot(aes(cost_complexity, mean)) +
+geom_line(size = 1.5, alpha = 0.6) +
+geom_point(size = 2) +
+facet_wrap(~ .metric, scales = "free", nrow = 2)
+```
+
+```{r}
+best_tree = tree_res %>%
+select_best("accuracy")
+
+best_tree
+```
+
+```{r}
+final_wf =
+shark_wflow %>%
+finalize_workflow(best_tree)
+```
+
+```{r}
+final_fit2 = fit(final_wf, train2)
+
+tree2 = final_fit2 %>%
+pull_workflow_fit() %>%
+pluck("fit")
+
+fancyRpartPlot(tree2, tweak = 3)
+```
+
+```{r}
+treepred = predict(final_fit2, train2, type = "class")
+
+confusionMatrix(treepred$.pred_class,train2$Deal_Yes,positive="Yes")
+```
+
+```{r}
+treepred_test = predict(final_fit2, test2, type = "class")
+head(treepred_test)
+
+confusionMatrix(treepred_test$.pred_class,test2$Deal_Yes,positive="Yes") 
+```
+
+### XG Boost Approach 
+
+```{r}
+set.seed(123) 
+shark_split = initial_split(sharktank_clean, prop = 0.7, strata = Deal_Yes) #70% in training
+train = training(shark_split) 
+test = testing(shark_split)
+```
+
+```{r}
+use_xgboost(Deal_Yes ~., train)
+```
+
+```{r}
+set.seed(123)
+folds = vfold_cv(train, v = 5)
+```
+
+```{r}
+start_time = Sys.time() #for timing
+
+xgboost_recipe <- 
+  recipe(formula = Deal_Yes ~ ., data = train) %>% 
+  #step_novel(all_nominal(), -all_outcomes()) %>% 
+  step_dummy(all_nominal(), -all_outcomes(), one_hot = TRUE) %>% 
+  step_zv(all_predictors()) 
+
+xgboost_spec <- 
+  boost_tree(trees = tune(), min_n = tune(), tree_depth = tune(), learn_rate = tune(), 
+    loss_reduction = tune(), sample_size = tune()) %>% 
+  set_mode("classification") %>% 
+  set_engine("xgboost") 
+
+xgboost_workflow <- 
+  workflow() %>% 
+  add_recipe(xgboost_recipe) %>% 
+  add_model(xgboost_spec) 
+
+set.seed(77680)
+xgboost_tune <-
+  tune_grid(xgboost_workflow, resamples = folds, grid = 25)
+
+end_time = Sys.time()
+end_time - start_time
+```
+
+```{r}
+best_xgb = select_best(xgboost_tune, "accuracy")
+
+final_xgb = finalize_workflow(
+  xgboost_workflow,
+  best_xgb
+)
+
+final_xgb
+
+
+```
+
+```{r}
+final_xgb_fit = fit(final_xgb, train)
+
+final_xgb_fit %>% pull_workflow_fit() %>% vip(geom = "point")
+
+final_xgb_fittest = fit(final_xgb, test)
+
+final_xgb_fittest %>% pull_workflow_fit() %>% vip(geom = "point")
+
+```
+
+```{r}
+trainpredxgb = predict(final_xgb_fit, train)
+head(trainpredxgb)
+```
+
+```{r}
+confusionMatrix(trainpredxgb$.pred_class, train$Deal_Yes, 
+                positive = "Yes")
+```
+
+```{r}
+testpredxgb = predict(final_xgb_fit, test)
+```
+
+```{r}
+confusionMatrix(testpredxgb$.pred_class, test$Deal_Yes, 
+                positive = "Yes")
+```
+
+
+
+
+
+
+
+
+
